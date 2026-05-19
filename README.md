@@ -1,29 +1,21 @@
 # Todo App
 
-A straightforward Todo application built with FastAPI, PostgreSQL, and React.
+Simple todo app. FastAPI backend, React frontend, SQLite for storage.
 
-## Prerequisites
+## Setup
 
-- Python 3.11+
-- Node.js 18+
-
-## Quick Start
-
-The easiest way -- run everything with one script:
+Easiest way:
 
 ```bash
-chmod +x run.sh
 ./run.sh
 ```
 
-This sets up a Python venv, installs deps, runs migrations (SQLite), and launches both backend and frontend.
+That handles the venv, dependencies, migrations, and starts both servers.
 
-### Manual Setup
-
-If you prefer to run things separately:
+Or do it manually:
 
 ```bash
-# Backend
+# backend
 cd backend
 python3 -m venv venv
 source venv/bin/activate
@@ -31,27 +23,26 @@ pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload
 
-# Frontend (in another terminal)
+# frontend (separate terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-- Backend: `http://localhost:8000` (docs at `/docs`)
-- Frontend: `http://localhost:5173`
+Backend runs on :8000, frontend on :5173. API docs at /docs.
 
 ## API
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | /api/todos | List todos (paginated, filterable by status) |
-| POST | /api/todos | Create a todo |
-| GET | /api/todos/:id | Get a todo |
-| PATCH | /api/todos/:id | Partial update |
-| DELETE | /api/todos/:id | Delete a todo |
-| GET | /api/health | Health check |
+```
+GET    /api/todos          list (paginated, filterable)
+POST   /api/todos          create
+GET    /api/todos/:id      get one
+PATCH  /api/todos/:id      partial update
+DELETE /api/todos/:id      delete
+GET    /api/health         health check
+```
 
-Query params for listing: `page`, `page_size`, `status` (pending/in_progress/completed).
+Listing supports `page`, `page_size`, and `status` query params.
 
 ## Tests
 
@@ -60,44 +51,51 @@ cd backend
 pytest -v
 ```
 
-Tests use SQLite in-memory, no database setup needed.
+21 tests, runs against SQLite in-memory so no db setup needed. Covers the API endpoints and service layer -- creates, updates, deletes, pagination, filtering, validation errors, 404s.
 
-## Project Structure
+## How it's structured
 
 ```
 backend/
   app/
-    main.py          # FastAPI app setup
-    config.py        # Settings from env
-    database.py      # SQLAlchemy engine + session
-    models.py        # Todo model
-    schemas.py       # Request/response schemas
-    service.py       # Business logic
-    routes.py        # API endpoints
-    exceptions.py    # Error handling
-  alembic/           # Migrations
-  tests/
+    config.py       pydantic-settings, reads from .env
+    database.py     engine, session, get_db dependency
+    models.py       Todo model + TodoStatus enum
+    schemas.py      pydantic schemas for request/response
+    service.py      business logic (queries, creates, etc)
+    routes.py       FastAPI endpoints, thin layer over service
+    exceptions.py   TodoNotFound + exception handler
+    main.py         app setup, cors, middleware
+  alembic/          migrations
+  tests/            pytest suite
 frontend/
   src/
-    App.jsx          # Main component
-    api.js           # Backend client
-    components/      # UI components
+    api.js          fetch wrapper for the backend
+    App.jsx         main component, state management
+    components/     TodoForm, TodoItem, Pagination
 ```
 
-## Architecture Decisions
+Flat structure, intentionally. A single-model CRUD app doesn't need packages within packages.
 
-**Flat structure** -- No nested packages. A Todo app doesn't need domain-driven design. One service module, one routes module, done.
+## Technical notes
 
-**Service layer but no repository** -- The service functions talk directly to SQLAlchemy. Adding a repository abstraction for a single model would be ceremony without value.
+**Database**: SQLite locally (just a file, zero setup), but the code works fine with Postgres -- just swap `DATABASE_URL` in `.env`. The model uses `native_enum=False` so the enum maps to a varchar column instead of a native PG enum, which keeps things portable. Indexes on `status` and `due_date` since those are the obvious filter/sort candidates.
 
-**UUIDs for IDs** -- Avoids sequential enumeration of resources. Minor overhead but standard practice for APIs.
+**SQLAlchemy 2.0 style**: Using `mapped_column` and `Mapped` type annotations. `DeclarativeBase` instead of the old `declarative_base()` function. Queries use `select()` instead of the legacy `session.query()` API.
 
-**SQLite for tests** -- Fast, zero-config. The ORM abstracts away dialect differences for basic CRUD. For a production app with complex queries, you'd want to test against Postgres too.
+**Partial updates**: PATCH with `model_dump(exclude_unset=True)` so clients only send the fields they want to change. The alternative (PUT with full replacement) is more annoying for callers who just want to toggle a status.
 
-**PATCH for updates** -- Partial updates via `exclude_unset`. PUT would require sending the full object, which is annoying for clients that just want to flip a status.
+**UUIDs**: Primary keys are UUIDs instead of auto-increment integers. Slightly more overhead but avoids leaking info about how many records exist and is generally better practice for anything exposed via API.
 
-**No auth** -- Intentionally omitted. Would add JWT or session-based auth in a real deployment, but it's orthogonal to the core CRUD logic.
+**Service layer**: Functions in `service.py` take a db session and do the actual work. Routes are thin -- they parse the request, call a service function, return the response. No repository abstraction; for one model that's just unnecessary indirection.
+
+**Error handling**: `TodoNotFound` exception with a registered handler that returns a proper 404 JSON response. Validation errors go through FastAPI/Pydantic's built-in 422 handling.
+
+**Testing**: Tests override the `get_db` dependency to inject a SQLite in-memory session. Each test gets a fresh database (tables created/dropped per test via an autouse fixture). The API tests use FastAPI's `TestClient`, service tests call the functions directly.
+
+**Frontend**: Minimal React app, no state library, no component library. Just `useState`/`useEffect`/`useCallback` and vanilla CSS. The API client is a thin wrapper around `fetch`. Inline editing, status filtering, pagination, confirm on delete.
+
 
 ## Environment
 
-Copy `.env.example` to `.env` and adjust as needed. The only required variable is `DATABASE_URL`.
+Copy `.env.example` to `.env`. Only thing you'd change is `DATABASE_URL` if you want to point at Postgres instead of SQLite.
