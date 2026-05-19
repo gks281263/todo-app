@@ -3,11 +3,21 @@ import { getTodos, createTodo, updateTodo, deleteTodo } from "./api";
 import TodoForm from "./components/TodoForm";
 import TodoItem from "./components/TodoItem";
 import Pagination from "./components/Pagination";
+import Auth from "./components/Auth";
 import "./App.css";
 
 const PER_PAGE = 10;
 
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user"));
+    } catch {
+      return null;
+    }
+  });
+
   const [todos, setTodos] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -15,7 +25,30 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const handleLogin = (newToken, newUser) => {
+    localStorage.setItem("token", newToken);
+    localStorage.setItem("user", JSON.stringify(newUser));
+    setToken(newToken);
+    setUser(newUser);
+    setPage(1);
+  };
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken(null);
+    setUser(null);
+    setTodos([]);
+  }, []);
+
+  useEffect(() => {
+    const handleAuthExpired = () => handleLogout();
+    window.addEventListener("auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("auth-expired", handleAuthExpired);
+  }, [handleLogout]);
+
   const refresh = useCallback(() => {
+    if (!token) return;
     setLoading(true);
     getTodos(page, PER_PAGE, filter)
       .then((data) => {
@@ -25,7 +58,7 @@ export default function App() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [page, filter]);
+  }, [page, filter, token]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -46,9 +79,19 @@ export default function App() {
     refresh();
   }
 
+  if (!token) {
+    return <Auth onLogin={handleLogin} />;
+  }
+
   return (
     <div className="container">
-      <h1>Todos</h1>
+      <header className="app-header">
+        <h1>Todos</h1>
+        <div className="user-controls">
+          <span className="user-email">{user?.email}</span>
+          <button onClick={handleLogout} className="btn-link logout-btn">Logout</button>
+        </div>
+      </header>
 
       <TodoForm onSave={handleCreate} />
 

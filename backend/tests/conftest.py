@@ -28,10 +28,29 @@ def db():
 
 @pytest.fixture
 def client(db):
-    # override get_db to use our test session
     def override():
         yield db
 
     app.dependency_overrides[get_db] = override
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def test_user(db):
+    from app.auth import hash_pw
+    from app.models import User
+    
+    u = User(email="test@example.com", password_hash=hash_pw("password123"))
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+@pytest.fixture
+def auth_client(client, test_user):
+    from app.auth import create_token
+    token = create_token(test_user.id)
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
